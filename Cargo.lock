@@ -419,6 +419,8 @@ dependencies = [
  "hubcaps",
  "owo-colors 2.0.0",
  "prettytable-rs",
+ "reqwest",
+ "serde",
  "structopt",
  "tokio",
 ]
@@ -1121,6 +1123,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",

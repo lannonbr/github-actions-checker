@@ -3,6 +3,7 @@ extern crate prettytable;
 
 use color_eyre::eyre::Result;
 use hubcaps::{Credentials, Github};
+use owo_colors::OwoColorize;
 use prettytable::Table;
 use std::collections::HashSet;
 use structopt::StructOpt;
@@ -15,15 +16,32 @@ struct Flags {
     fix: bool,
 }
 
+#[derive(serde::Deserialize, Debug)]
+struct CommitJSON {
+    node_id: String,
+    object: ObjectData,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct ObjectData {
+    sha: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let flags = Flags::from_args();
 
+    let token = std::env::var("GITHUB_TOKEN").unwrap();
+
     let github_client = Github::new(
         "Github-Actions-Checker/0.1.0",
-        Credentials::Token(std::env::var("GITHUB_TOKEN").unwrap()),
+        Credentials::Token(token.clone()),
     )?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("Github-Actions-Checker/0.1.0")
+        .build()?;
 
     // Read workflow file
     let file = tokio::fs::read_to_string(&flags.file).await?;
@@ -39,6 +57,8 @@ async fn main() -> Result<()> {
     version_table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     version_table.set_titles(row!["Action", "Current Version", "Latest Version"]);
 
+    println!("Checking through actions for updates:\n---\n");
+
     for (_repo, version) in lines {
         let (owner, repo) = _repo.split_once("/").unwrap();
 
@@ -53,7 +73,6 @@ async fn main() -> Result<()> {
             _ => panic!("no exact match found"),
         };
 
-        // let current_release = repo_ref.releases().by_tag(version).await?;
         let newest_release = repo_ref.releases().latest().await?;
 
         let newest_tag = match repo_ref
@@ -64,13 +83,18 @@ async fn main() -> Result<()> {
             hubcaps::git::GetReferenceResponse::Exact(reference) => reference,
             _ => panic!("no exact match found"),
         };
-        dbg!(&current_tag_ref);
 
         // If the reference for the current tag is actually a tag, go resolve the tag's commit sha
         let current_sha = if current_tag_ref.object.object_type == "tag" {
-            // grab current_tag.object.url and fetch the data found there
-            todo!("Resolve tag commit sha");
-            "".to_string()
+            let response = client
+                .get(current_tag_ref.object.url)
+                .header("Authorization", format!("token {}", token))
+                .send()
+                .await?
+                .json::<CommitJSON>()
+                .await?;
+
+            response.object.sha
         } else if current_tag_ref.object.object_type == "commit" {
             current_tag_ref.object.sha
         } else {
@@ -79,22 +103,24 @@ async fn main() -> Result<()> {
 
         let new_sha = newest_tag.object.sha;
 
-        println!("{}\n{} - {}", _repo, current_sha, new_sha);
-
         if newest_release.tag_name.starts_with(&version) && current_sha == new_sha {
             println!("{} is up to date", _repo);
         } else {
-            println!("NEW UPDATE");
-            println!("{}, {}", _repo, newest_release.name);
+            println!(
+                "{}",
+                format!(
+                    "There is a new update for {} at the tag: {}",
+                    _repo, newest_release.name
+                )
+                .yellow()
+            );
         }
 
         version_table.add_row(row![_repo, version, newest_release.tag_name]);
-        println!("");
     }
 
+    println!();
     print!("{}", version_table);
-
-    // TODO: Use GitHub Releases API to check if there is a new release
 
     // TODO: Print out outdated actions (And maybe suggest using --fix to update them automatically)
     if flags.fix {
