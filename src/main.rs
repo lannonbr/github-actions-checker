@@ -14,6 +14,8 @@ struct Flags {
     file: std::path::PathBuf,
     #[structopt(long)]
     fix: bool,
+    #[structopt(long)]
+    verbose: bool,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -58,6 +60,8 @@ async fn main() -> Result<()> {
     version_table.set_titles(row!["Action", "Current Version", "Latest Version"]);
 
     println!("Checking through actions for updates:\n---\n");
+
+    let mut updates = 0;
 
     for (_repo, version) in lines {
         let (owner, repo) = _repo.split_once("/").unwrap();
@@ -104,23 +108,42 @@ async fn main() -> Result<()> {
         let new_sha = newest_tag.object.sha;
 
         if newest_release.tag_name.starts_with(&version) && current_sha == new_sha {
-            println!("{} is up to date", _repo);
+            if flags.verbose {
+                println!("{} is up to date", _repo);
+            }
         } else {
             println!(
                 "{}",
                 format!(
-                    "There is a new update for {} at the tag: {}",
+                    "[Update] {} has a new version: {}",
                     _repo, newest_release.name
                 )
                 .yellow()
             );
+            updates += 1;
         }
 
         version_table.add_row(row![_repo, version, newest_release.tag_name]);
     }
 
     println!();
-    print!("{}", version_table);
+    if flags.verbose {
+        println!("Actions:");
+        println!();
+        print!("{}", version_table);
+        println!();
+    }
+    println!("Results:");
+    println!();
+    println!(
+        "{} outdated action{}. Try \"github-actions-checker --fix\" to update the files to such.",
+        updates,
+        if updates != 1 {
+            's'.to_string()
+        } else {
+            "".to_string()
+        }
+    );
 
     // TODO: Print out outdated actions (And maybe suggest using --fix to update them automatically)
     if flags.fix {
